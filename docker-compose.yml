@@ -1,0 +1,68 @@
+services:
+  posts-postgres:
+    image: postgres:15-alpine
+    container_name: posts-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: posts
+    ports:
+      - "5437:5432"
+    volumes:
+      - posts-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - posts-network
+      - mailing-network
+
+  posts-migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: posts-migrate
+    depends_on:
+      posts-postgres:
+        condition: service_healthy
+    command: ["sh", "-c", "sleep 5 && migrate -path /app/schema -database postgres://postgres:postgres@posts-postgres:5432/posts?sslmode=disable up"]
+    volumes:
+      - ./schema:/app/schema
+    environment:
+      DB_PASSWORD: postgres
+    networks:
+      - posts-network
+
+  posts-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: posts-api
+    depends_on:
+      posts-postgres:
+        condition: service_healthy
+      posts-migrate:
+        condition: service_completed_successfully
+    ports:
+      - "8092:8080"
+    environment:
+      DB_PASSWORD: postgres
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_TOPIC: posts
+      JWT_SECRET: your-secret-key-change-in-production
+
+    networks:
+      - posts-network
+      - mailing-network
+
+networks:
+  posts-network:
+    driver: bridge
+  mailing-network:
+    external: true
+
+
+volumes:
+  posts-postgres-data:
